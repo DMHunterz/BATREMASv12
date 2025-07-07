@@ -11,6 +11,7 @@ import { LogsPanel } from "@/components/logs-panel"
 import { PositionsPanel } from "@/components/positions-panel"
 import { StatsCards } from "@/components/stats-cards"
 import { BalanceCard } from "@/components/balance-card"
+import { KeepAlive } from "@/components/keep-alive"
 
 interface BotStatus {
   running: boolean
@@ -71,6 +72,8 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-4">
+            <KeepAlive />
+
             <Badge variant={botStatus.test_mode ? "secondary" : "destructive"}>
               {botStatus.test_mode ? "MODO TESTE" : "MODO REAL"}
             </Badge>

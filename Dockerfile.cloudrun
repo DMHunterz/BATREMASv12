@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Instalar dependências
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar código
+COPY . .
+
+# Criar diretórios
+RUN mkdir -p logs config
+
+# Usar porta do Cloud Run
+ENV PORT 8080
+EXPOSE 8080
+
+# Comando de inicialização
+CMD exec uvicorn backend.main:app --host 0.0.0.0 --port $PORT

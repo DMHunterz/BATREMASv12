@@ -44,51 +44,36 @@ bot_state = {
     "logs": []
 }
 
-# Modelos Pydantic
-class BotConfig(BaseModel):
-    limit: int = 100
-    leverage: int = 15
-    risk_per_trade_percent: float = 0.5
-    max_risk_usdt_per_trade: float = 1.0
-    test_mode: bool = True
-    kline_interval_minutes: int = 5
-    kline_trend_period: int = 50
-    kline_pullback_period: int = 10
-    kline_atr_period: int = 14
-    min_atr_multiplier_for_entry: float = 1.5
-    max_symbols_to_monitor: int = 5
-    risk_reward_ratio: float = 2.0
+# Configuração de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/bot_activity.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-class APICredentials(BaseModel):
-    api_key: str
-    api_secret: str
-
-class BotStatus(BaseModel):
-    running: bool
-    start_time: Optional[str]
-    uptime: Optional[str]
-    positions_count: int
-    test_mode: bool
-
-# Função para inicializar o cliente Binance (do seu código original)
+# Função para inicializar o cliente Binance
 def initialize_binance_client():
     global client
     if not API_KEY or not API_SECRET:
-        print("[ERRO] Variáveis de ambiente BINANCE_API_KEY ou BINANCE_API_SECRET não encontradas.")
+        logger.error("Variáveis de ambiente BINANCE_API_KEY ou BINANCE_API_SECRET não encontradas.")
         return False
 
     try:
         temp_client = Client(API_KEY, API_SECRET)
         temp_client.futures_ping()  # Testa a conexão
         client = temp_client
-        print("[INFO] Cliente Binance Futures inicializado com sucesso.")
+        logger.info("Cliente Binance Futures inicializado com sucesso.")
         return True
     except Exception as e:
-        print(f"[ERRO] Falha ao inicializar cliente Binance: {e}")
+        logger.error(f"Falha ao inicializar cliente Binance: {e}")
         client = None
         return False
 
-# Função para obter saldo (baseada na sua função mostrar_saldo())
+# Função para obter saldo
 def get_binance_balance():
     global client
     if client is None:
@@ -116,13 +101,13 @@ def get_binance_balance():
         total_margin_balance = float(account_info['totalMarginBalance'])
         available_balance = float(account_info['availableBalance'])
         
-        # Calcular saldo em uso (margem utilizada)
+        # Calcular saldo em uso
         used_balance = total_margin_balance - available_balance
         
         return {
             "total_balance": total_margin_balance,
             "available_balance": available_balance,
-            "used_balance": max(0, used_balance),  # Garantir que não seja negativo
+            "used_balance": max(0, used_balance),
             "unrealized_pnl": total_unrealized_pnl,
             "total_wallet_balance": total_wallet_balance,
             "currency": "USDT",
@@ -130,7 +115,7 @@ def get_binance_balance():
         }
         
     except Exception as e:
-        print(f"[ERRO] Falha ao obter saldo: {e}")
+        logger.error(f"Falha ao obter saldo: {e}")
         return None
 
 # Função para obter posições abertas
@@ -146,16 +131,15 @@ def get_open_positions():
         
         for position in positions:
             position_amt = float(position['positionAmt'])
-            if position_amt != 0:  # Apenas posições abertas
+            if position_amt != 0:
                 entry_price = float(position['entryPrice'])
                 mark_price = float(position['markPrice'])
                 unrealized_pnl = float(position['unRealizedProfit'])
                 
-                # Calcular PnL percentual
                 pnl_percent = 0
                 if entry_price > 0:
                     pnl_percent = ((mark_price - entry_price) / entry_price) * 100
-                    if position_amt < 0:  # Posição short
+                    if position_amt < 0:
                         pnl_percent = -pnl_percent
                 
                 open_positions.append({
@@ -174,18 +158,65 @@ def get_open_positions():
         return open_positions
         
     except Exception as e:
-        print(f"[ERRO] Falha ao obter posições: {e}")
+        logger.error(f"Falha ao obter posições: {e}")
         return []
 
-# Inicializar cliente na inicialização do app
+# Inicializar na startup
 @app.on_event("startup")
 async def startup_event():
+    # Criar diretórios necessários
+    os.makedirs("logs", exist_ok=True)
+    os.makedirs("config", exist_ok=True)
+    
+    # Inicializar cliente Binance
     initialize_binance_client()
+    
+    logger.info("🚀 Bot API iniciado no Railway!")
+
+# Modelos Pydantic
+class BotConfig(BaseModel):
+    limit: int = 100
+    leverage: int = 15
+    risk_per_trade_percent: float = 0.5
+    max_risk_usdt_per_trade: float = 1.0
+    test_mode: bool = True
+    kline_interval_minutes: int = 5
+    kline_trend_period: int = 50
+    kline_pullback_period: int = 10
+    kline_atr_period: int = 14
+    min_atr_multiplier_for_entry: float = 1.5
+    max_symbols_to_monitor: int = 5
+    risk_reward_ratio: float = 2.0
+
+class APICredentials(BaseModel):
+    api_key: str
+    api_secret: str
+
+class BotStatus(BaseModel):
+    running: bool
+    start_time: Optional[str]
+    uptime: Optional[str]
+    positions_count: int
+    test_mode: bool
 
 # Endpoints
 @app.get("/")
 async def root():
-    return {"message": "Binance Trading Bot API", "status": "online"}
+    return {
+        "message": "Binance Trading Bot API", 
+        "status": "online",
+        "platform": "Railway",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "bot_running": bot_state["running"],
+        "binance_connected": client is not None
+    }
 
 @app.get("/status", response_model=BotStatus)
 async def get_bot_status():
@@ -196,7 +227,6 @@ async def get_bot_status():
         minutes = int((uptime_seconds % 3600) // 60)
         uptime = f"{hours}h {minutes}m"
     
-    # Obter configuração atual para test_mode
     test_mode = True
     try:
         with open("config/settings.json", "r") as f:
@@ -227,28 +257,32 @@ async def update_config(config: BotConfig):
         os.makedirs("config", exist_ok=True)
         with open("config/settings.json", "w") as f:
             json.dump(config.dict(), f, indent=2)
+        logger.info("Configuração atualizada com sucesso")
         return {"message": "Configuração atualizada com sucesso"}
     except Exception as e:
+        logger.error(f"Erro ao salvar configuração: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/credentials")
 async def update_credentials(credentials: APICredentials):
     global API_KEY, API_SECRET, client
     try:
-        with open(".env", "w") as f:
-            f.write(f"BINANCE_API_KEY={credentials.api_key}\n")
-            f.write(f"BINANCE_API_SECRET={credentials.api_secret}\n")
-        
         # Atualizar variáveis globais
         API_KEY = credentials.api_key
         API_SECRET = credentials.api_secret
         
         # Reinicializar cliente
         client = None
-        initialize_binance_client()
+        success = initialize_binance_client()
         
-        return {"message": "Credenciais atualizadas com sucesso"}
+        if success:
+            logger.info("Credenciais atualizadas e cliente reinicializado com sucesso")
+            return {"message": "Credenciais atualizadas com sucesso"}
+        else:
+            raise HTTPException(status_code=400, detail="Credenciais inválidas")
+            
     except Exception as e:
+        logger.error(f"Erro ao atualizar credenciais: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/start")
@@ -259,6 +293,7 @@ async def start_bot(background_tasks: BackgroundTasks):
     bot_state["running"] = True
     bot_state["start_time"] = time.time()
     
+    logger.info("🚀 Bot iniciado!")
     return {"message": "Bot iniciado com sucesso"}
 
 @app.post("/stop")
@@ -269,6 +304,7 @@ async def stop_bot():
     bot_state["running"] = False
     bot_state["start_time"] = None
     
+    logger.info("🛑 Bot parado!")
     return {"message": "Bot parado com sucesso"}
 
 @app.get("/logs")
@@ -289,6 +325,7 @@ async def get_positions():
         positions = get_open_positions()
         return {"positions": positions}
     except Exception as e:
+        logger.error(f"Erro ao obter posições: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/balance")
@@ -300,6 +337,7 @@ async def get_balance():
         
         return balance_data
     except Exception as e:
+        logger.error(f"Erro ao obter saldo: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao obter saldo: {str(e)}")
 
 @app.post("/positions/{symbol}/close")
@@ -309,7 +347,6 @@ async def close_position(symbol: str):
         raise HTTPException(status_code=500, detail="Cliente Binance não inicializado")
     
     try:
-        # Obter informação da posição
         positions = client.futures_position_information(symbol=symbol)
         position = None
         
@@ -322,12 +359,9 @@ async def close_position(symbol: str):
             raise HTTPException(status_code=404, detail="Posição não encontrada")
         
         position_amt = float(position['positionAmt'])
-        
-        # Determinar lado da ordem para fechar
         side = Client.SIDE_SELL if position_amt > 0 else Client.SIDE_BUY
         quantity = abs(position_amt)
         
-        # Enviar ordem de mercado para fechar
         order = client.futures_create_order(
             symbol=symbol,
             side=side,
@@ -336,9 +370,11 @@ async def close_position(symbol: str):
             reduceOnly=True
         )
         
+        logger.info(f"Posição {symbol} fechada com sucesso")
         return {"message": f"Posição {symbol} fechada com sucesso", "order_id": order['orderId']}
         
     except Exception as e:
+        logger.error(f"Erro ao fechar posição {symbol}: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao fechar posição: {str(e)}")
 
 @app.post("/test-connection")
@@ -370,4 +406,5 @@ async def test_connection():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

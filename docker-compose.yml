@@ -8,9 +8,10 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./config:/app/config
-      - ./.env:/app/.env
     environment:
-      - PYTHONPATH=/app
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - PORT=8000
     restart: unless-stopped
 
   frontend:
@@ -19,6 +20,8 @@ services:
       dockerfile: Dockerfile.frontend
     ports:
       - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
     depends_on:
       - backend
     restart: unless-stopped
